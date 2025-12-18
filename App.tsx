@@ -21,13 +21,13 @@ const CELL_GAP = 8;
 const COL_WIDTH = CELL_DIM + CELL_GAP;
 
 export default function App() {
-
   const dragOffset = useSharedValue(0);
   const startColumn = useSharedValue(0);
 
   const [colNum, setColNum] = useState(0);
 
-  const { boardState, handleMove, currentPlayer } = useGame();
+  const { boardState, handleMove, currentPlayer, status, winner, resetGame } =
+    useGame();
   const pan = Gesture.Pan()
     .minDistance(1)
     .onStart(() => {
@@ -68,29 +68,41 @@ export default function App() {
   return (
     <GestureHandlerRootView>
       <View style={styles.container}>
+        {/* Game Status */}
+        <View style={styles.statusContainer}>
+          {status == "playing" && (
+            <Text>{`Player ${currentPlayer}'s turn!`}</Text>
+          )}
+          {status == "won" && <Text>{`Player ${winner} Won!`}</Text>}
+          {status == "draw" && <Text>{"It's a draw!"}</Text>}
+          <Button title="New Game" onPress={resetGame} />
+        </View>
         <GestureDetector gesture={Gesture.Simultaneous(doubleTap, pan)}>
           <Animated.View>
-            <Animated.View
-              key={"Header"}
-              style={[styles.row, styles.header, animatedHeadersStyle]}
-            >
-              {Array(7)
-                .fill(0)
-                .map((_, colIndex) => (
-                  <View
-                    key={colIndex}
-                    style={[
-                      styles.cell,
-                      colIndex == colNum &&
-                        currentPlayer === 1 &&
-                        styles.player1,
-                      colIndex == colNum &&
-                        currentPlayer === 2 &&
-                        styles.player2,
-                    ]}
-                  ></View>
-                ))}
-            </Animated.View>
+            {status == "playing" && (
+              <Animated.View
+                key={"Header"}
+                style={[styles.row, styles.header, animatedHeadersStyle]}
+              >
+                {Array(7)
+                  .fill(0)
+                  .map((_, colIndex) => (
+                    <View
+                      key={colIndex}
+                      style={[
+                        styles.cell,
+                        colIndex == colNum &&
+                          currentPlayer === 1 &&
+                          styles.player1,
+                        colIndex == colNum &&
+                          currentPlayer === 2 &&
+                          styles.player2,
+                      ]}
+                    ></View>
+                  ))}
+              </Animated.View>
+            )}
+
             <View style={styles.board}>
               {boardState.map((row, rowIndex) => (
                 <View key={rowIndex} style={styles.row}>
@@ -125,6 +137,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  statusContainer: {},
+
   board: {
     flexDirection: "column", // Stack rows vertically
     borderWidth: 2,
