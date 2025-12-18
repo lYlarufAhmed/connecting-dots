@@ -13,38 +13,41 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
+  withSpring,
 } from "react-native-reanimated";
 
-const { width } = Dimensions.get("screen");
+const CELL_DIM = 50;
+const CELL_GAP = 8;
+const COL_WIDTH = CELL_DIM + CELL_GAP;
 
 export default function App() {
-  const startPosition = useSharedValue(0);
+
+  const dragOffset = useSharedValue(0);
+  const startColumn = useSharedValue(0);
 
   const [colNum, setColNum] = useState(0);
-  const [lastTapTS, setLastTapTS] = useState<number | null>(null);
 
   const { boardState, handleMove, currentPlayer } = useGame();
-  const selectNextCol = () => setColNum((prev) => (prev < 6 ? prev + 1 : 0));
-  const selectPrevCol = () => setColNum((prev) => (prev > 0 ? prev - 1 : 6));
-
-  const flingGesture = Gesture.Fling()
-    .direction(Directions.RIGHT | Directions.LEFT)
-    .onBegin((e) => {
-      startPosition.value = e.x;
-    })
-    .onStart((e) => {
-      const diff = e.x - startPosition.value;
-      console.log("move ", Math.round((diff / width) * 100));
-      if (diff > 0) selectNextCol();
-      if (diff < 0) selectPrevCol();
-    })
-    .runOnJS(true);
-
-  // implement double tap/signle tap
-  const singleTap = Gesture.Tap()
-    .maxDuration(250)
+  const pan = Gesture.Pan()
+    .minDistance(1)
     .onStart(() => {
-      console.log("Single tap!");
+      startColumn.value = colNum;
+    })
+    .onUpdate((e) => {
+      const columnMoved = Math.round(e.translationX / COL_WIDTH);
+      const newColumn = startColumn.value + columnMoved;
+      const clampedColumn = Math.max(0, Math.min(6, newColumn));
+      setColNum(clampedColumn);
+      dragOffset.value = e.translationX;
+    })
+    .onEnd((e) => {
+      // fling at the end to add momentum
+      const velocity = e.velocityX;
+      const momentumColumns = Math.round(velocity / 1000);
+
+      const finalColumn = colNum + momentumColumns;
+      setColNum(Math.max(0, Math.min(6, finalColumn)));
+      dragOffset.value = withSpring(0);
     })
     .runOnJS(true);
 
@@ -58,12 +61,19 @@ export default function App() {
     })
     .runOnJS(true);
 
+  const animatedHeadersStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: dragOffset.value * 0.1 }],
+  }));
+
   return (
     <GestureHandlerRootView>
       <View style={styles.container}>
-        <GestureDetector gesture={Gesture.Exclusive(doubleTap, flingGesture)}>
-          <View>
-            <View key={"Header"} style={styles.row}>
+        <GestureDetector gesture={Gesture.Simultaneous(doubleTap, pan)}>
+          <Animated.View>
+            <Animated.View
+              key={"Header"}
+              style={[styles.row, styles.header, animatedHeadersStyle]}
+            >
               {Array(7)
                 .fill(0)
                 .map((_, colIndex) => (
@@ -80,7 +90,7 @@ export default function App() {
                     ]}
                   ></View>
                 ))}
-            </View>
+            </Animated.View>
             <View style={styles.board}>
               {boardState.map((row, rowIndex) => (
                 <View key={rowIndex} style={styles.row}>
@@ -100,9 +110,9 @@ export default function App() {
                 </View>
               ))}
             </View>
-          </View>
+          </Animated.View>
         </GestureDetector>
-      </View> 
+      </View>
       <StatusBar style="auto" />
     </GestureHandlerRootView>
   );
@@ -119,11 +129,11 @@ const styles = StyleSheet.create({
     flexDirection: "column", // Stack rows vertically
     borderWidth: 2,
     borderColor: "#333",
-    gap: 8,
+    gap: CELL_GAP,
     padding: 6,
   },
-  control: {
-    flexDirection: "row",
+  header: {
+    padding: 6,
   },
   row: {
     gap: 8,
@@ -134,8 +144,8 @@ const styles = StyleSheet.create({
     borderColor: "#999",
   },
   cell: {
-    width: 50,
-    height: 50,
+    width: CELL_DIM,
+    height: CELL_DIM,
 
     alignItems: "center",
     justifyContent: "center",
