@@ -124,4 +124,8 @@ export class Game {
 
     }
 
+    getNextAvailableRow(col: number): number {
+        return this.board.getNextAvailableRow(col)
+    }
+
 }

@@ -33,6 +33,10 @@ export function useGame() {
         game.current.reset()
         syncState()
     }
+
+    const getNextAvailableRow = (col: number): number => {
+        return game.current.getNextAvailableRow(col)
+    }
     // 4. Return everything the UI needs
 
     return {
@@ -42,5 +46,6 @@ export function useGame() {
         status,          // 'playing', 'won', 'draw'
         handleMove,      // Function to make a move
         resetGame,        // Function to reset
+        getNextAvailableRow
     }
 }
