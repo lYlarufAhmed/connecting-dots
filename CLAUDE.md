@@ -29,6 +29,7 @@ src/
 ├── types/          - TypeScript type definitions for the entire application
 ├── constants/      - Game configuration and immutable values
 ├── models/         - Pure game logic (no UI dependencies)
+├── hooks/          - Custom React hooks (useGame, useSound)
 ├── components/     - React components (View layer) [TODO: Not yet implemented]
 ├── controllers/    - Orchestration layer [TODO: Not yet implemented]
 └── utils/          - Helper functions [TODO: Not yet implemented]
@@ -50,7 +51,21 @@ The game logic is implemented using two core classes:
 - Tracks current player turn (1 or 2)
 - Implements win detection algorithm (checks 4 directions: horizontal, vertical, diagonal-up, diagonal-down)
 - Manages game status: 'playing', 'won', 'draw'
-- Key methods: `makeMove()`, `checkWinner()`, `reset()`, `isGameOver()`
+- Key methods: `makeMove()`, `checkWinner()`, `reset()`, `isGameOver()`, `getNextAvailableRow()`
+
+### Hooks Layer (src/hooks/)
+
+**`useGame.ts`** - Game state management hook
+- Wraps Game model instance in React state
+- Provides methods: `handleMove()`, `resetGame()`, `getNextAvailableRow()`
+- Syncs model state with React state after each operation
+- Returns: `boardState`, `currentPlayer`, `winner`, `status`, and methods
+
+**`useSound.ts`** - Audio playback hook
+- Encapsulates `expo-audio` player lifecycle
+- Loads audio file on mount, unloads on unmount
+- Returns player instance for flexible control
+- Usage: `const { player } = useSound(require('./path/to/sound.wav'))`
 
 ### Type System (src/types/index.ts)
 
@@ -88,12 +103,112 @@ All state-changing operations validate preconditions:
 ### 3. Single Responsibility
 - **Board**: Only handles board data structure
 - **Game**: Only handles game rules and turn management
-- **Components** (to be built): Only handle rendering and user interaction
+- **Hooks**: Encapsulate reusable logic (state, audio)
+- **Components**: Only handle rendering and user interaction
 
 ### 4. Configuration Driven
 Game rules are configurable via `GameConfig`:
 - Board dimensions can be customized (default: 6 rows × 7 cols)
 - Connect-N value can be changed (default: 4)
+
+## Animation Architecture (React Native Reanimated)
+
+### Thread Model
+
+The app uses React Native Reanimated for 60fps animations:
+
+```
+┌─────────────────────┐         ┌─────────────────────┐
+│   UI Thread         │         │   JS Thread         │
+│   (60fps worklets)  │         │   (React & JS APIs) │
+├─────────────────────┤         ├─────────────────────┤
+│ Shared Values ✅    │         │ React State ✅      │
+│ withSpring ✅       │         │ Game Logic ✅       │
+│ withTiming ✅       │         │ Audio APIs ✅       │
+│ useAnimatedStyle ✅ │         │                     │
+│                     │         │                     │
+│   runOnJS() ────────┼────────→│ Bridge to call      │
+│   (required for)    │         │ JS functions        │
+└─────────────────────┘         └─────────────────────┘
+```
+
+### Component Pattern for Animated Lists
+
+When animating items in a list, extract to a separate component to avoid React Hooks violations:
+
+**❌ Wrong:** Using `useAnimatedStyle` inside `.map()`
+```typescript
+{items.map((item, index) => {
+  const style = useAnimatedStyle(() => ({ ... })); // Hooks rule violation!
+  return <Animated.View style={style} />;
+})}
+```
+
+**✅ Correct:** Extract to component
+```typescript
+function AnimatedItem({ index, animatingIndex, animateValue }) {
+  const style = useAnimatedStyle(() => ({
+    transform: [{
+      translateY: index === animatingIndex.value ? animateValue.value : 0
+    }]
+  }));
+  return <Animated.View style={style} />;
+}
+
+// In parent:
+{items.map((item, index) => (
+  <AnimatedItem key={index} index={index} {...props} />
+))}
+```
+
+**Example in codebase:** `HeaderCell` component in `App.tsx`
+
+### Worklets and runOnJS
+
+**Worklets** are functions that run on the UI thread (marked with `'worklet';` directive).
+
+**Critical pattern:** Always use `runOnJS()` when calling JS functions from worklets:
+
+```typescript
+animateDistance.value = withSpring(targetValue, config, (finished) => {
+  'worklet';  // This callback runs on UI thread
+  
+  // ✅ Shared values - OK
+  animateDistance.value = 0;
+  
+  // ✅ JS functions - need runOnJS
+  runOnJS(handleMove)(columnToMove);
+  runOnJS(setIsAnimating)(false);
+  runOnJS(playAudio)();
+});
+```
+
+**Common mistake:** Calling JS functions without `runOnJS()` will silently fail (no error, just doesn't execute).
+
+## Asset Loading (Expo)
+
+### Static Assets (Audio, Images)
+
+**❌ Wrong:** String paths don't work on physical devices
+```typescript
+const audioPath = "./assets/sound.wav";
+useSound(audioPath);  // Works in simulator, fails on device
+```
+
+**✅ Correct:** Use `require()` for static analysis
+```typescript
+const audioSource = require('./assets/sound.wav');
+useSound(audioSource);  // Works everywhere
+```
+
+**Why:** Metro bundler needs static `require()` calls to include assets in the bundle.
+
+### Dependencies
+
+Audio requires peer dependency:
+```bash
+npx expo install expo-audio expo-asset
+```
 
 ## Win Detection Algorithm
 
@@ -118,19 +233,23 @@ The project is in active development:
 - Core game logic (Board and Game classes)
 - Type system
 - Win detection algorithm
-- Basic UI rendering of the board
-
-🚧 **In Progress:**
-- Interactive gameplay (touch handlers for column selection)
+- Interactive gameplay with gesture handlers
+- Piece drop animation (React Native Reanimated)
+- Sound effects integration (expo-audio)
+- Custom hooks (useGame, useSound)
 - Player turn indicators
 - Win/draw notifications
 - Game reset functionality
 
+🚧 **Known Issues:**
+- Audio timing has ~50-100ms delay due to thread handoff (see DEVELOPMENT_LOG.md for improvement options)
+
 📋 **Not Yet Implemented:**
-- React components in `src/components/`
+- React components in `src/components/` (using inline components currently)
 - Utility functions in `src/utils/`
 - Controllers in `src/controllers/`
-- Animations (piece dropping, win highlighting)
+- Win highlight animation
+- Undo/redo functionality
 
 ## Testing Scenarios
 
@@ -145,12 +264,9 @@ Use these scenarios to validate game logic changes.
 ## Important Notes
 
 ### State Management
-Currently uses `useState` directly in `App.tsx`. Consider refactoring to:
-- Custom hooks (`useGame`) for game state management
-- React Context for global game state (if adding features like undo/redo)
-
-### Board Instantiation
-The Board class should be instantiated through the Game class, not directly in components. The current `App.tsx` creates a Board directly, which should be refactored to use the Game class.
+- Uses custom `useGame` hook for game state management
+- Game model instance stored in `useRef` to persist across renders
+- State synced to React after each game operation
 
 ### Move Validation
 `Game.makeMove()` returns boolean:
@@ -158,3 +274,29 @@ The Board class should be instantiated through the Game class, not directly in c
 - `false`: Move rejected (column full, game over, invalid column)
 
 Always check return value before updating UI state.
+
+### Animation Model Updates
+When animating, update the model **after** animation completes, not before:
+1. User triggers move
+2. Animation plays (visual feedback)
+3. Animation completes → update game model → React re-renders
+
+This prevents visual glitches and ensures smooth UX.
+
+### Expo Configuration
+
+**babel.config.js** must include Reanimated plugin (MUST be last):
+```javascript
+plugins: [
+  'react-native-reanimated/plugin', // Must be last!
+]
+```
+
+### Testing on Devices
+- Always test on physical device, not just simulator
+- Expo Go works for this project (all dependencies compatible)
+- Asset loading behaves differently on simulator vs device
+
+## Development Log
+
+See `DEVELOPMENT_LOG.md` for session-by-session development history and future improvement tasks.
