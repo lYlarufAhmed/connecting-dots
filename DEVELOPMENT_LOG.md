@@ -547,6 +547,7 @@ if (!isMuted) {
 
 **Next Session Ideas:**
 - Implement audio timing improvements (try Option 3 first)
+- Fix the error related to audio. sometime the audio doesn't play
 - Add win animation
 - Polish animation parameters
 - Add mute toggle
@@ -554,3 +555,442 @@ if (!isMuted) {
 ---
 
 *For technical architecture details, see CLAUDE.md*
+
+---
+
+## Session 2: Expo Router Navigation Implementation
+**Date:** December 21, 2025  
+**Focus:** Multi-game architecture with Expo Router
+
+### Goals Achieved ✅
+
+1. **Expo Router Integration**
+   - Installed and configured Expo Router (file-based routing)
+   - Migrated from single-file app to multi-screen architecture
+   - Proper navigation setup with Stack navigator
+
+2. **Home Screen**
+   - Created game hub with welcome message
+   - Card-based game list UI
+   - Navigation to individual games
+
+3. **Code Reorganization**
+   - Moved Connect Four to separate route
+   - Maintained all game functionality (animations, sounds, gestures)
+   - Scalable structure for adding more games
+
+---
+
+### Technical Implementation
+
+#### File Structure Changes
+
+**New Structure:**
+```
+app/
+├── _layout.tsx          # Root navigation layout
+├── index.tsx            # Home screen (game list)
+└── connect-four.tsx     # Connect Four game
+
+src/
+├── hooks/
+├── models/
+├── types/
+└── constants/
+
+package.json             # main: "expo-router/entry"
+```
+
+**Key Files:**
+
+1. **app/_layout.tsx** - Root layout with navigation wrapper
+2. **app/index.tsx** - Home screen with game cards
+3. **app/connect-four.tsx** - Game screen (moved from App.tsx)
+
+#### Navigation Configuration
+
+**Dependencies Added:**
+```json
+{
+  "expo-router": "~6.0.21",
+  "react-native-screens": "~4.16.0",
+  "react-native-safe-area-context": "~5.6.0",
+  "expo-linking": "~8.0.11",
+  "expo-constants": "~18.0.12",
+  "expo-asset": "~12.0.12"
+}
+```
+
+**package.json main entry:**
+```json
+{
+  "main": "expo-router/entry"
+}
+```
+
+#### Routing Pattern
+
+Expo Router uses file-based routing:
+- `app/index.tsx` → `/` (home)
+- `app/connect-four.tsx` → `/connect-four`
+- `app/_layout.tsx` → Wraps all screens
+
+Navigation is automatic based on file names!
+
+---
+
+### Design Decisions
+
+#### Why Expo Router over React Navigation?
+
+**Advantages:**
+- ✅ File-based routing (like Next.js)
+- ✅ Auto-discovers routes
+- ✅ Less boilerplate
+- ✅ Built-in TypeScript support
+- ✅ Deep linking by default
+
+#### GestureHandler Wrapper Location
+
+Placed `GestureHandlerRootView` in `_layout.tsx` to wrap entire navigation tree:
+- All screens can use gestures
+- Single wrapper (cleaner)
+- No need to add per-screen
+
+---
+
+### Future Enhancements
+
+#### Adding More Games
+
+To add a new game:
+1. Create `app/[game-name].tsx`
+2. Add to `GAMES` array in `app/index.tsx`
+3. Route automatically registered!
+
+Example:
+```typescript
+// app/index.tsx
+const GAMES: Game[] = [
+  {
+    id: 'connect-four',
+    title: 'Connect Four',
+    description: 'Connect 4 dots in a row to win!',
+    route: '/connect-four',
+    emoji: '🔴',
+  },
+  {
+    id: 'tic-tac-toe',
+    title: 'Tic Tac Toe',
+    description: 'Classic X and O game!',
+    route: '/tic-tac-toe',
+    emoji: '❌',
+  },
+];
+```
+
+#### Navigation Customization Ideas
+
+- Custom transitions between screens
+- Gestures for swipe-back
+- Nested navigation (tabs within games)
+- Deep linking to specific games
+- Share links to games
+
+---
+
+## Known Issues & Improvements
+
+### 🔧 Audio Reliability Issues
+
+**Status:** Active bug - audio playback unreliable  
+**Priority:** High  
+**Impact:** User experience degradation
+
+#### Problem Description
+
+**Symptoms:**
+1. Audio sometimes doesn't play when piece drops
+2. CoreAudio warnings in iOS simulator (harmless but noisy)
+3. Intermittent playback failures
+
+**Error Logs (iOS Simulator):**
+```
+[MediaToolbox] FigFilePlayer signalled err=-12864
+[CoreAudio] HALC_ProxyIOContext::_StartIO(): Start failed
+[AudioToolbox] Audio device 131: error 0 fetching sample rate
+```
+
+**Root Causes:**
+1. **expo-audio player state management**
+   - Player may not be ready when `play()` called
+   - Race condition between load and play
+   - No error handling in `playAudio()` function
+
+2. **iOS Simulator audio issues**
+   - Simulator audio system less reliable than device
+   - CoreAudio warnings are simulator-specific
+   - May not reflect real device behavior
+
+3. **Current implementation weaknesses:**
+   ```typescript
+   const playAudio = () => {
+     player.seekTo(0);  // ❌ No await, no error handling
+     player.play();     // ❌ May fail silently
+   };
+   ```
+
+#### Solution Options
+
+##### Option 1: Add Proper Async/Await + Error Handling (Quick Fix)
+
+**Priority:** High - Do this first!
+
+**Current code:**
+```typescript
+// app/connect-four.tsx line 115-118
+const playAudio = () => {
+  player.seekTo(0);
+  player.play();
+};
+```
+
+**Improved version:**
+```typescript
+const playAudio = async () => {
+  try {
+    if (player) {
+      await player.seekTo(0);
+      await player.play();
+    }
+  } catch (error) {
+    console.warn('Audio playback failed:', error);
+    // Silently fail - don't crash the game
+  }
+};
+```
+
+**Update callsite:**
+```typescript
+// In doubleTap gesture handler
+playAudio(); // Already works - function is async but we don't await
+```
+
+**Benefits:**
+- ✅ Prevents crashes
+- ✅ Handles player not ready
+- ✅ Easy to implement
+- ✅ Doesn't block animation
+
+**Implementation:**
+- File: `app/connect-four.tsx`
+- Lines: 115-118
+- Add try/catch wrapper
+- Make function async
+
+---
+
+##### Option 2: Switch to expo-av (More Stable)
+
+**Priority:** Medium - If Option 1 doesn't help
+
+`expo-av` is more mature and has better error handling than `expo-audio`.
+
+**New useSound hook:**
+```typescript
+// src/hooks/useSound.ts
+import { Audio } from 'expo-av';
+import { useEffect, useRef } from 'react';
+
+export function useSound(soundFile: any) {
+  const sound = useRef<Audio.Sound | null>(null);
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadSound = async () => {
+      try {
+        const { sound: loadedSound } = await Audio.Sound.createAsync(soundFile);
+        if (isMounted) {
+          sound.current = loadedSound;
+          setIsLoaded(true);
+        }
+      } catch (error) {
+        console.warn('Failed to load sound:', error);
+      }
+    };
+    
+    loadSound();
+
+    return () => {
+      isMounted = false;
+      sound.current?.unloadAsync();
+    };
+  }, [soundFile]);
+
+  const play = async () => {
+    if (!isLoaded || !sound.current) {
+      console.warn('Sound not loaded yet');
+      return;
+    }
+
+    try {
+      await sound.current.setPositionAsync(0);
+      await sound.current.playAsync();
+    } catch (error) {
+      console.warn('Playback failed:', error);
+    }
+  };
+
+  return { play, isLoaded };
+}
+```
+
+**Benefits:**
+- ✅ More reliable
+- ✅ Better error handling
+- ✅ Proper async lifecycle
+- ✅ Load state tracking
+
+**Migration needed:**
+- Install: `npx expo install expo-av`
+- Update `src/hooks/useSound.ts`
+- Update `app/connect-four.tsx` usage
+
+---
+
+##### Option 3: Pre-load and Keep Loaded (Performance)
+
+**Priority:** Low - Optimization
+
+Instead of seeking to 0 each time, keep multiple sound instances:
+
+```typescript
+// src/hooks/useSoundPool.ts
+import { Audio } from 'expo-av';
+import { useEffect, useRef } from 'react';
+
+export function useSoundPool(soundFile: any, poolSize = 3) {
+  const soundPool = useRef<Audio.Sound[]>([]);
+  const currentIndex = useRef(0);
+
+  useEffect(() => {
+    const loadSounds = async () => {
+      const promises = Array(poolSize).fill(null).map(async () => {
+        const { sound } = await Audio.Sound.createAsync(soundFile);
+        return sound;
+      });
+      soundPool.current = await Promise.all(promises);
+    };
+
+    loadSounds();
+
+    return () => {
+      soundPool.current.forEach(sound => sound.unloadAsync());
+    };
+  }, [soundFile, poolSize]);
+
+  const play = async () => {
+    const sound = soundPool.current[currentIndex.current];
+    if (sound) {
+      try {
+        await sound.setPositionAsync(0);
+        await sound.playAsync();
+        currentIndex.current = (currentIndex.current + 1) % poolSize;
+      } catch (error) {
+        console.warn('Playback failed:', error);
+      }
+    }
+  };
+
+  return { play };
+}
+```
+
+**Benefits:**
+- ✅ No seek time
+- ✅ Multiple rapid plays supported
+- ✅ Better performance
+
+**Cons:**
+- ⚠️ More memory usage
+- ⚠️ Overkill for single game
+
+---
+
+##### Option 4: Use Haptic Feedback as Fallback
+
+**Priority:** Low - Enhancement
+
+Add vibration when sound fails:
+
+```typescript
+import * as Haptics from 'expo-haptics';
+
+const playAudioWithHaptic = async () => {
+  try {
+    await player.seekTo(0);
+    await player.play();
+  } catch (error) {
+    // Fallback to haptic
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  }
+};
+```
+
+**Benefits:**
+- ✅ Always provides feedback
+- ✅ Works when audio fails
+- ✅ Enhances UX on devices
+
+---
+
+### Recommended Implementation Order
+
+**Phase 1: Quick Fixes (Do Now)**
+1. ✅ Implement Option 1 (async/await + try/catch)
+2. ✅ Test on physical device (not just simulator)
+3. ✅ Add logging to track failures
+
+**Phase 2: If Issues Persist**
+1. Implement Option 2 (switch to expo-av)
+2. Add load state checking
+3. Better error messages
+
+**Phase 3: Optimization (Later)**
+1. Sound pooling if needed
+2. Haptic feedback enhancement
+3. Performance profiling
+
+---
+
+### Testing Checklist
+
+Before considering audio "fixed":
+- [ ] Test on iOS simulator
+- [ ] Test on iOS physical device
+- [ ] Test on Android simulator
+- [ ] Test on Android physical device
+- [ ] Test rapid consecutive drops (stress test)
+- [ ] Test after app backgrounding
+- [ ] Check for memory leaks (long play session)
+
+---
+
+### Debug Commands
+
+```bash
+# Clear Metro cache
+npx expo start -c
+
+# Check audio file is bundled
+ls -la .expo/web/cache/development/metro-*/assets/
+
+# Run with verbose logging
+EXPO_DEBUG=true npx expo start
+```
+
+---
+
+*See CLAUDE.md for audio architecture details*
